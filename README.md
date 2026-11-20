@@ -1,25 +1,42 @@
 # KF2 Randomizer — Windows Desktop
 
-Native desktop randomizer for **Killing Floor 2** with ten classes, class filters, skill side combinations, optional challenges, maps, match difficulties, wave lengths, shuffle-bag anti-repeat mode and saved history. **No browser, HTML, or game injection.**
+A self-contained **Killing Floor 2** fan-made randomizer for Windows x64. A real **PySide6 / Qt desktop app**, not a web page, HTML shell or game mod.
 
-## Download
+## Download and update
 
-**[Latest GitHub Release](https://github.com/yungspiderq/kf2-randomizer/releases/latest)** — download `KF2-Randomizer.exe` under **Assets**. This is a self-contained 64-bit Windows Qt application; Python is not needed to run it.
+**[Latest release](https://github.com/yungspiderq/kf2-randomizer/releases/latest)** → `KF2-Randomizer.exe` under **Assets**.
 
-Open the application and click **Проверить обновления** in the header. If a newer stable GitHub Release exists, confirm to download it. The app verifies SHA-256, exits, replaces itself and relaunches. Automatic checking at launch is enabled by default and can be disabled in the left Settings panel. Updates are opt-in and never install silently. Settings/history remain in your user profile.
+The button **Проверить обновления** checks official releases for this repository, prompts for confirmation, downloads the verified `.exe`, restarts and preserves settings. SHA-256 validation is mandatory before installation; background automatic install is not performed. Windows SmartScreen may show a prompt because the app is not code-signed.
 
-The old `KF2-Randomizer-Native.exe` (Win32 build, v0.3.0) is kept in source history for reference, but only the main `KF2-Randomizer.exe` (PySide6) has in-app updates.
+## Randomizer
 
-## Build from source
+- 10 playable KF2 perks, level 5–25 skill-side choices, maps, difficulty, match length and optional challenges.
+- **85 curated in-game weapons** in 10 categories, including 12 optionally enabled DLC-labelled entries. Names and assignments are an editable catalog, not a claim of live in-game ownership or inventory.
+- **Perk-only weapons** (default) or a global pool, 1–3 unique items, category selector, DLC toggle (off by default), and attempt to avoid weapons used on the previous roll.
+- **Reroll weapons** without changing your class, skills, map or difficulty.
+- Results in history and on clipboard include chosen weapon names. Compatible with v0.4.0 saved settings/history.
+- Clean, restrained dark UI. Thin hand-drawn vector icons in toolbar, perk list and weapon results; no emoji/icon-font dependencies.
 
-- Install Python 3.12 for Windows.
-- Run `START_QT_WINDOWS.bat` to launch from source, or `BUILD_QT_EXE_WINDOWS.bat` to build `dist\\KF2-Randomizer.exe`.
-- GitHub Actions builds the Windows release automatically on pushes to `main`. A new release is created if its version tag (as stated in `VERSION.txt`) does not already exist.
+**Important:** This is a randomizer of virtual items inside the video game only. It does not change anything in KF2 or grant DLC ownership. Some game content/cross-perk flags may vary by game update; edits are welcome to `weapons_data.py`.
 
-Development tests: `python -m unittest discover -s tests -v`. The updater code is in `update_service.py` and uses the GitHub REST API; file downloads are limited in size and SHA-256 verified. When the application is launched from Python sources, update downloading works, but auto-replacement of `python.exe` is intentionally disabled.
+## Build locally
 
-## Notes
+Use Python 3.12 on Windows:
 
-- Windows binaries are unsigned and may prompt SmartScreen; the full source is included here.
-- The app provides optional game-only suggestions, not a game mod; it does not modify the game.
-- This is a fan project, unaffiliated with Tripwire Interactive.
+```powershell
+python -m pip install -r requirements.txt pyinstaller
+python -m PyInstaller --noconfirm --onefile --windowed --clean --name KF2-Randomizer --icon assets/kf2.ico kf2_randomizer.py
+```
+
+Or run `START_QT_WINDOWS.bat` to start from Python, `BUILD_QT_EXE_WINDOWS.bat` to produce `dist/KF2-Randomizer.exe`. GitHub Actions automatically creates the Windows build and publishes a GitHub Release when a new `VERSION.txt` is merged to `main`.
+
+Development checks:
+
+```powershell
+python -m unittest discover -s tests -v
+python tests/qt_smoke.py
+```
+
+## Credits
+
+Fan project by [yungspiderq](https://github.com/yungspiderq), not affiliated with Tripwire Interactive. UI cleanup follows the practical principles of [unslop](https://github.com/heydamir/unslop): clear hierarchy, restrained accent color, less visual noise, consistent spacing and purposeful icons. In-game item reference catalog based on the community-maintained [KF2 weapons index](https://killingfloor.fandom.com/wiki/Killing_Floor_2_Weapons).

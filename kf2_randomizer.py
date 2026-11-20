@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from update_service import Release, fetch_latest, download_update, launch_replace_and_restart
+from weapons_data import CATEGORIES, WEAPONS, WEAPON_BY_ID, available_weapons, choose_loadout, weapon_labels
+from ui_icons import icon as glyph
 
 from PySide6.QtCore import Qt, QStandardPaths, QThread, Signal, QTimer, QUrl
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QDesktopServices
@@ -24,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_TITLE = "KF2 RANDOMIZER"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 RNG = random.SystemRandom()
 
 # Ten playable character classes. The app randomizes skill-side selections
@@ -50,6 +52,13 @@ MAPS = [
     "Outpost", "Prison", "Sanitarium", "Shopping Spree", "Steam Fortress",
     "The Tragic Kingdom", "Volter Manor", "Zed Landing",
 ]
+
+PERK_ICONS = {
+    "Берсеркер": "melee", "Коммандос": "assault", "Поддержка": "shotgun",
+    "Полевой медик": "medical", "Подрывник": "explosive", "Поджигатель": "flame",
+    "Стрелок": "handgun", "Снайпер": "precision", "Спецназ": "smg",
+    "Выживальщик": "special",
+}
 
 DIFFICULTIES = ["Normal", "Hard", "Suicidal", "Hell on Earth"]
 LENGTHS = [("Короткий — 4 волны", 4), ("Средний — 7 волн", 7), ("Длинный — 10 волн", 10)]
@@ -132,50 +141,55 @@ def icon_pixmap() -> QPixmap:
 
 
 QSS = """
-* { font-family: 'Segoe UI', 'Arial'; color: #EBEDEF; font-size: 13px; }
-QMainWindow, #Root { background: #101216; }
-QFrame#Panel { background: #181B21; border: 1px solid #2B303A; border-radius: 14px; }
-QFrame#Card { background: #20242C; border: 1px solid #303641; border-radius: 12px; }
-QFrame#Hero { background: #211A1B; border: 1px solid #6B3432; border-radius: 16px; }
-QLabel#Brand { color: #FFFFFF; font-size: 23px; font-weight: 900; letter-spacing: 2px; }
-QLabel#Kicker { color: #EF736A; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
-QLabel#Title { color: #FFFFFF; font-size: 17px; font-weight: 800; }
-QLabel#Section { color: #F1F2F3; font-size: 12px; font-weight: 800; }
-QLabel#Muted { color: #99A1AF; }
-QLabel#Value { color: #FFF9F4; font-size: 18px; font-weight: 750; }
-QLabel#HeroValue { color: #FFFFFF; font-size: 33px; font-weight: 900; }
-QLabel#Badge { background: #44211F; color: #FFB3A8; border: 1px solid #80443E;
-                 border-radius: 8px; padding: 7px 10px; font-weight: 800; }
-QPushButton { background: #272C34; border: 1px solid #3A414D; border-radius: 9px;
-              padding: 10px 14px; font-weight: 650; }
-QPushButton:hover { background: #353C48; border-color: #6B7381; }
-QPushButton:pressed { background: #424957; }
-QPushButton#Primary { background: #DB4842; border: 1px solid #F46B61; color: white;
-                      font-weight: 850; font-size: 14px; }
-QPushButton#Primary:hover { background: #F0574E; }
-QPushButton#Primary:pressed { background: #C43B37; }
-QPushButton#Quiet { background: transparent; border-color: #353A43; color: #AFB6C2; }
-QPushButton#Quiet:hover { background: #292E38; color: white; }
-QPushButton:disabled { color: #5F646F; background: #1D2025; border-color: #272B32; }
-QComboBox { background: #242932; border: 1px solid #414855; border-radius: 8px;
-            padding: 9px 10px; min-height: 18px; }
-QComboBox:hover { border-color: #E17870; }
-QComboBox::drop-down { border: 0px; width: 23px; }
-QComboBox QAbstractItemView { background: #242932; border: 1px solid #474F5C;
-                              selection-background-color: #96403C; }
-QCheckBox { spacing: 9px; padding: 3px 1px; }
-QCheckBox::indicator { width: 17px; height: 17px; border-radius: 5px;
-                       background: #252B35; border: 1px solid #626A77; }
-QCheckBox::indicator:checked { background: #D95149; border-color: #D95149; image: none; }
+* { font-family: 'Segoe UI', 'Arial'; color: #E5E9EF; font-size: 13px; }
+QMainWindow, #Root { background: #111419; }
+QFrame#Panel { background: #1B2026; border: 1px solid #303640; border-radius: 9px; }
+QFrame#Card { background: #1A1F25; border: 1px solid #303640; border-radius: 8px; }
+QFrame#Hero { background: #1C2026; border: 1px solid #35383E; border-left: 3px solid #C95A50; border-radius: 9px; }
+QFrame#WeaponRow { background: #191E23; border: 1px solid #303640; border-radius: 7px; }
+QLabel#Brand { color: #F3F5F8; font-size: 23px; font-weight: 700; }
+QLabel#Kicker { color: #C1C8D1; font-size: 11px; font-weight: 600; }
+QLabel#Title { color: #F3F5F8; font-size: 17px; font-weight: 700; }
+QLabel#Section { color: #F3F5F8; font-size: 13px; font-weight: 650; }
+QLabel#Muted { color: #9EA8B5; }
+QLabel#Value { color: #F0F2F5; font-size: 16px; font-weight: 600; }
+QLabel#HeroValue { color: #FFFFFF; font-size: 30px; font-weight: 700; }
+QLabel#Badge { background: #382624; color: #E9B0A9; border: 1px solid #60423E;
+                 border-radius: 5px; padding: 5px 8px; font-weight: 700; }
+QLabel#WeaponTitle { color: #F3F5F8; font-size: 14px; font-weight: 650; }
+QLabel#WeaponInfo { color: #AAB4BE; font-size: 11px; }
+QLabel#DlcBadge { color: #D4C09D; font-size: 10px; background: #302C26;
+                  border: 1px solid #554B3E; border-radius: 4px; padding: 3px 6px; }
+QPushButton { background: #262C34; border: 1px solid #3B434D; border-radius: 7px;
+              padding: 9px 12px; font-weight: 600; }
+QPushButton:hover { background: #333B45; border-color: #626B77; }
+QPushButton:pressed { background: #404850; }
+QPushButton#Primary { background: #C85750; border: 1px solid #CB615A; color: white;
+                      font-weight: 700; }
+QPushButton#Primary:hover { background: #DC655D; }
+QPushButton#Primary:pressed { background: #A4443F; }
+QPushButton#Quiet { background: transparent; border-color: #38414C; color: #CED5DE; }
+QPushButton#Quiet:hover { background: #282F38; color: white; }
+QPushButton:disabled { color: #667180; background: #20252B; border-color: #303640; }
+QComboBox { background: #242B33; border: 1px solid #414B55; border-radius: 7px;
+            padding: 8px 10px; min-height: 18px; }
+QComboBox:hover { border-color: #B26962; }
+QComboBox::drop-down { border: 0px; width: 22px; }
+QComboBox QAbstractItemView { background: #242B33; border: 1px solid #414B55;
+                              selection-background-color: #68423F; }
+QCheckBox { spacing: 8px; padding: 3px 1px; }
+QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px;
+                       background: #252B33; border: 1px solid #687380; }
+QCheckBox::indicator:checked { background: #C85750; border-color: #C85750; image: none; }
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; }
 QScrollBar:vertical { background: transparent; width: 9px; margin: 3px; }
-QScrollBar::handle:vertical { background: #414955; border-radius: 4px; min-height: 35px; }
+QScrollBar::handle:vertical { background: #454D58; border-radius: 4px; min-height: 35px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-QListWidget { border: 0px; background: #181B21; outline: none; }
-QListWidget::item { padding: 10px; border-bottom: 1px solid #2A2E36; }
-QListWidget::item:selected { background: #3D292A; border-radius: 8px; }
-QSplitter::handle { background: transparent; width: 5px; }
+QListWidget { border: 0px; background: #1B2026; outline: none; }
+QListWidget::item { padding: 10px; border-bottom: 1px solid #303640; }
+QListWidget::item:selected { background: #3D3030; border-radius: 6px; }
+QSplitter::handle { background: transparent; width: 7px; }
 """
 
 
@@ -187,22 +201,31 @@ def label(text: str = "", kind: str = "", wrap: bool = False) -> QLabel:
     return out
 
 
-def button(text: str, kind: str = "") -> QPushButton:
+def button(text: str, kind: str = "", icon_name: str = "") -> QPushButton:
     b = QPushButton(text)
     b.setCursor(Qt.CursorShape.PointingHandCursor)
+    if icon_name:
+        b.setIcon(glyph(icon_name, "#FFFFFF" if kind == "Primary" else "#D5DCE5"))
     if kind:
         b.setObjectName(kind)
     return b
 
 
-def panel(title: str | None = None) -> tuple[QFrame, QVBoxLayout]:
+def panel(title: str | None = None, icon_name: str = "") -> tuple[QFrame, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName("Panel")
     lay = QVBoxLayout(frame)
     lay.setContentsMargins(16, 16, 16, 16)
     lay.setSpacing(10)
     if title:
-        lay.addWidget(label(title.upper(), "Section"))
+        heading = QHBoxLayout()
+        heading.setSpacing(8)
+        if icon_name:
+            emblem = QLabel()
+            emblem.setPixmap(glyph(icon_name, "#A9B3BF").pixmap(18, 18))
+            heading.addWidget(emblem)
+        heading.addWidget(label(title, "Section"), 1)
+        lay.addLayout(heading)
     return frame, lay
 
 
@@ -212,7 +235,7 @@ def build_card(name: str) -> tuple[QFrame, QLabel]:
     vl = QVBoxLayout(card)
     vl.setContentsMargins(17, 15, 17, 15)
     vl.setSpacing(8)
-    vl.addWidget(label(name.upper(), "Kicker"))
+    vl.addWidget(label(name, "Kicker"))
     value = label("—", "Value", True)
     value.setMinimumHeight(46)
     value.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -255,8 +278,8 @@ class Randomizer(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Killing Floor 2 Randomizer — {VERSION}")
         self.setWindowIcon(QIcon(icon_pixmap()))
-        self.resize(1330, 855)
-        self.setMinimumSize(1000, 700)
+        self.resize(1320, 900)
+        self.setMinimumSize(1024, 690)
         self.prefs = load_state()
         self.history: list[dict] = [x for x in self.prefs.get("history", []) if isinstance(x, dict)][:80]
         self.bag: list[str] = [x for x in self.prefs.get("bag", []) if x in PERKS]
@@ -280,26 +303,26 @@ class Randomizer(QMainWindow):
         root.setObjectName("Root")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(24, 20, 24, 18)
-        outer.setSpacing(16)
+        outer.setContentsMargins(20, 18, 20, 15)
+        outer.setSpacing(12)
 
         header = QHBoxLayout()
         brand = QVBoxLayout()
         brand.setSpacing(2)
-        brand.addWidget(label("HORZINE // RANDOM SYSTEM", "Kicker"))
-        brand.addWidget(label("KILLING FLOOR 2  /  RANDOMIZER", "Brand"))
+        brand.addWidget(label("Killing Floor 2 · утилита для матчей", "Muted"))
+        brand.addWidget(label("Randomizer", "Brand"))
         header.addLayout(brand)
         header.addStretch(1)
-        self.update_button = button("Проверить обновления", "Quiet")
+        self.update_button = button("Проверить обновления", "Quiet", "update")
         self.update_button.clicked.connect(self.check_updates)
         header.addWidget(self.update_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        htag = label(f"DESKTOP  ·  v{VERSION}", "Muted")
+        htag = label(f"v{VERSION}", "Muted")
         header.addWidget(htag, 0, Qt.AlignmentFlag.AlignVCenter)
         outer.addLayout(header)
 
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
-        split.setHandleWidth(14)
+        split.setHandleWidth(10)
         outer.addWidget(split, 1)
         sidebar = QScrollArea()
         sidebar.setWidgetResizable(True)
@@ -311,14 +334,22 @@ class Randomizer(QMainWindow):
         sidebar.setWidget(sidecontent)
         split.addWidget(sidebar)
 
-        prefs_panel, pp = panel("Фильтр классов")
+        prefs_panel, pp = panel("Классы", "class")
         pp.addWidget(label("Отметь классы, которые могут выпадать.", "Muted", True))
         for perk, data in PERKS.items():
-            cb = QCheckBox(f"{perk}   /   {data['en']}")
+            perkrow = QHBoxLayout()
+            perkrow.setSpacing(8)
+            emblem = QLabel()
+            emblem.setPixmap(glyph(PERK_ICONS[perk], "#B9C2CD", 17).pixmap(17, 17))
+            emblem.setFixedWidth(19)
+            perkrow.addWidget(emblem)
+            cb = QCheckBox(perk)
+            cb.setToolTip(data["en"] + " · " + data["role"])
             cb.setChecked(perk in self.prefs.get("selected_perks", list(PERKS)))
             self.perk_checks[perk] = cb
             cb.toggled.connect(self.persist)
-            pp.addWidget(cb)
+            perkrow.addWidget(cb, 1)
+            pp.addLayout(perkrow)
         select_buttons = QHBoxLayout()
         all_btn = button("Все", "Quiet")
         all_btn.clicked.connect(lambda: self.set_all_perks(True))
@@ -329,7 +360,7 @@ class Randomizer(QMainWindow):
         pp.addLayout(select_buttons)
         sidelay.addWidget(prefs_panel)
 
-        settings_panel, sp = panel("Настройки генерации")
+        settings_panel, sp = panel("Матч и испытания", "settings")
         self.skill_check = QCheckBox("Генерировать ветку навыков (5–25)")
         self.skill_check.setChecked(bool(self.prefs.get("skills_on", True)))
         self.skill_check.toggled.connect(self.persist)
@@ -372,16 +403,64 @@ class Randomizer(QMainWindow):
         self.challenge_combo.currentTextChanged.connect(self.persist)
         sp.addWidget(self.challenge_combo)
         sidelay.addWidget(settings_panel)
+
+        weapon_panel, wp = panel("Оружие", "weapon")
+        self.weapon_check = QCheckBox("Добавлять случайное оружие")
+        self.weapon_check.setChecked(bool(self.prefs.get("weapons_on", True)))
+        self.weapon_check.toggled.connect(self.persist)
+        wp.addWidget(self.weapon_check)
+
+        wp.addWidget(label("РЕЖИМ", "Kicker"))
+        self.weapon_mode_combo = QComboBox()
+        self.weapon_mode_combo.addItems(["По классу", "Любое оружие"])
+        self.weapon_mode_combo.setCurrentText(self.prefs.get("weapon_mode", "По классу"))
+        self.weapon_mode_combo.currentTextChanged.connect(self.persist)
+        wp.addWidget(self.weapon_mode_combo)
+
+        wp.addWidget(label("КОЛИЧЕСТВО", "Kicker"))
+        self.weapon_count_combo = QComboBox()
+        self.weapon_count_combo.addItems(["1", "2", "3"])
+        self.weapon_count_combo.setCurrentText(str(self.prefs.get("weapon_count", "2")))
+        self.weapon_count_combo.currentTextChanged.connect(self.persist)
+        wp.addWidget(self.weapon_count_combo)
+
+        wp.addWidget(label("КАТЕГОРИЯ", "Kicker"))
+        self.weapon_kind_combo = QComboBox()
+        self.weapon_kind_combo.addItem("Все категории", None)
+        for kind, title in CATEGORIES.items():
+            self.weapon_kind_combo.addItem(title, kind)
+        stored_kind = self.prefs.get("weapon_kind")
+        kind_index = self.weapon_kind_combo.findData(stored_kind)
+        self.weapon_kind_combo.setCurrentIndex(max(kind_index, 0))
+        self.weapon_kind_combo.currentIndexChanged.connect(self.persist)
+        wp.addWidget(self.weapon_kind_combo)
+
+        self.weapon_dlc_check = QCheckBox("Включить DLC-оружие")
+        self.weapon_dlc_check.setChecked(bool(self.prefs.get("weapon_dlc", False)))
+        self.weapon_dlc_check.toggled.connect(self.persist)
+        wp.addWidget(self.weapon_dlc_check)
+        self.weapon_avoid_check = QCheckBox("Стараться не повторять оружие")
+        self.weapon_avoid_check.setChecked(bool(self.prefs.get("weapon_avoid", True)))
+        self.weapon_avoid_check.toggled.connect(self.persist)
+        wp.addWidget(self.weapon_avoid_check)
+        wp.addWidget(label(
+            "При фильтре по классу неподходящие классы временно пропускаются. "
+            "DLC по умолчанию выключены.", "Muted", True))
+        sidelay.addWidget(weapon_panel)
         sidelay.addStretch(1)
         split.setStretchFactor(0, 0)
 
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         main = QWidget()
         mainlay = QVBoxLayout(main)
-        mainlay.setContentsMargins(0, 0, 0, 0)
-        mainlay.setSpacing(13)
-        split.addWidget(main)
+        mainlay.setContentsMargins(3, 1, 5, 3)
+        mainlay.setSpacing(12)
+        main_scroll.setWidget(main)
+        split.addWidget(main_scroll)
         split.setStretchFactor(1, 1)
-        split.setSizes([345, 950])
+        split.setSizes([335, 970])
 
         hero = QFrame()
         hero.setObjectName("Hero")
@@ -389,7 +468,10 @@ class Randomizer(QMainWindow):
         herolay.setContentsMargins(24, 22, 24, 22)
         herolay.setSpacing(7)
         first = QHBoxLayout()
-        first.addWidget(label("ТВОЙ СЛЕДУЮЩИЙ КЛАСС", "Kicker"))
+        self.perk_icon = QLabel()
+        self.perk_icon.setPixmap(glyph("class", "#E1A69E", 22).pixmap(22, 22))
+        first.addWidget(self.perk_icon)
+        first.addWidget(label("Случайный класс", "Kicker"))
         first.addStretch(1)
         self.mark = label("--", "Badge")
         first.addWidget(self.mark)
@@ -399,6 +481,20 @@ class Randomizer(QMainWindow):
         self.perk_meta = label("Нажми «Сгенерировать»", "Muted", True)
         herolay.addWidget(self.perk_meta)
         mainlay.addWidget(hero)
+
+        weapons_frame, wl = panel("Набор оружия", "weapon")
+        weapons_header = QHBoxLayout()
+        weapons_header.setSpacing(8)
+        self.weapon_summary = label("Оружие выбирается из игрового каталога", "Muted", True)
+        weapons_header.addWidget(self.weapon_summary, 1)
+        self.reroll_weapon_btn = button("Другое оружие", "Quiet", "reroll")
+        self.reroll_weapon_btn.clicked.connect(self.reroll_weapons)
+        weapons_header.addWidget(self.reroll_weapon_btn)
+        wl.addLayout(weapons_header)
+        self.weapon_rows_layout = QVBoxLayout()
+        self.weapon_rows_layout.setSpacing(7)
+        wl.addLayout(self.weapon_rows_layout)
+        mainlay.addWidget(weapons_frame)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(12)
@@ -415,7 +511,7 @@ class Randomizer(QMainWindow):
         grid.setColumnStretch(1, 1)
         mainlay.addLayout(grid)
 
-        chal, cl = panel("Дополнительное испытание")
+        chal, cl = panel("Дополнительное испытание", "check")
         self.challenge_value = label("—", "Value", True)
         self.challenge_value.setMinimumHeight(42)
         cl.addWidget(self.challenge_value)
@@ -424,34 +520,37 @@ class Randomizer(QMainWindow):
         mainlay.addWidget(chal)
 
         actions = QHBoxLayout()
-        self.generate_btn = button("СГЕНЕРИРОВАТЬ   /   Ctrl+R", "Primary")
+        self.generate_btn = button("Сгенерировать", "Primary", "random")
+        self.generate_btn.setToolTip("Случайный матч · Ctrl+R")
         self.generate_btn.clicked.connect(self.generate)
         self.generate_btn.setMinimumHeight(49)
         actions.addWidget(self.generate_btn, 4)
-        reroll = button("Только навыки")
+        reroll = button("Навыки", "", "reroll")
         reroll.clicked.connect(self.reroll_skills)
         actions.addWidget(reroll, 2)
-        copy_btn = button("Копировать")
+        copy_btn = button("Копировать", "", "copy")
         copy_btn.clicked.connect(self.copy_result)
         actions.addWidget(copy_btn, 2)
         mainlay.addLayout(actions)
 
-        hist, hl = panel("История · двойной клик откроет результат")
+        hist, hl = panel("История", "history")
         top = QHBoxLayout()
         self.count_label = label("", "Muted")
         top.addWidget(self.count_label)
+        top.addWidget(label("· двойной клик — открыть", "Muted"))
         top.addStretch(1)
-        clear_btn = button("Очистить историю", "Quiet")
+        clear_btn = button("Очистить", "Quiet", "trash")
         clear_btn.clicked.connect(self.clear_history)
         top.addWidget(clear_btn)
         hl.addLayout(top)
         self.history_list = QListWidget()
-        self.history_list.setMinimumHeight(130)
+        self.history_list.setMinimumHeight(145)
+        self.history_list.setMaximumHeight(200)
         self.history_list.itemDoubleClicked.connect(self.restore_history)
         hl.addWidget(self.history_list, 1)
-        mainlay.addWidget(hist, 1)
+        mainlay.addWidget(hist)
 
-        footer = label("Случайный набор для игры вручную. Не изменяет файлы, серверы и инвентарь KF2.", "Muted", True)
+        footer = label("Планировщик для матчей KF2. Ничего не меняет в самой игре.", "Muted", True)
         mainlay.addWidget(footer)
 
     def _spawn_update_worker(self, worker: UpdateWorker) -> None:
@@ -563,6 +662,12 @@ class Randomizer(QMainWindow):
             "difficulty": self.difficulty_combo.currentText(),
             "length": self.length_combo.currentText(),
             "challenge": self.challenge_combo.currentText(),
+            "weapons_on": self.weapon_check.isChecked(),
+            "weapon_mode": self.weapon_mode_combo.currentText(),
+            "weapon_count": self.weapon_count_combo.currentText(),
+            "weapon_kind": self.weapon_kind_combo.currentData(),
+            "weapon_dlc": self.weapon_dlc_check.isChecked(),
+            "weapon_avoid": self.weapon_avoid_check.isChecked(),
             "bag": self.bag,
             "history": self.history[:80],
         })
@@ -606,11 +711,90 @@ class Randomizer(QMainWindow):
             return "Нет подходящих испытаний", ""
         return RNG.choice(all_challenges)
 
+    def weapon_pool(self, perk: str) -> list:
+        return available_weapons(
+            perk,
+            any_class=self.weapon_mode_combo.currentText() == "Любое оружие",
+            include_dlc=self.weapon_dlc_check.isChecked(),
+            kind=self.weapon_kind_combo.currentData(),
+        )
+
+    def pick_weapon_ids(self, perk: str, old_ids: list[str] | None = None) -> list[str]:
+        if not self.weapon_check.isChecked():
+            return []
+        count = int(self.weapon_count_combo.currentText())
+        recent = old_ids or []
+        if self.weapon_avoid_check.isChecked() and not recent:
+            recent = self.current.get("weapons", []) if self.current else []
+        selected = choose_loadout(
+            self.weapon_pool(perk), count,
+            recent=recent if self.weapon_avoid_check.isChecked() else (),
+            rng=RNG,
+        )
+        return [w.id for w in selected]
+
+    def reroll_weapons(self) -> None:
+        if not self.current:
+            return
+        if not self.weapon_check.isChecked():
+            QMessageBox.information(self, "Оружие выключено", "Включи случайное оружие в левой панели.")
+            return
+        perk = self.current.get("perk", "")
+        if not self.weapon_pool(perk):
+            QMessageBox.warning(self, "Нет оружия", "Для этого класса и фильтра нет доступных предметов. Измени настройки оружия.")
+            return
+        result = self.current.copy()
+        result["weapons"] = self.pick_weapon_ids(perk, list(result.get("weapons", [])))
+        result["when"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        self.accept_result(result)
+
+    def update_weapon_rows(self, ids: list[str]) -> None:
+        while self.weapon_rows_layout.count():
+            child = self.weapon_rows_layout.takeAt(0)
+            if child.widget() is not None:
+                child.widget().deleteLater()
+        weapons = [WEAPON_BY_ID[x] for x in ids if x in WEAPON_BY_ID]
+        self.reroll_weapon_btn.setEnabled(bool(weapons))
+        if not weapons:
+            self.weapon_summary.setText("Случайное оружие выключено или не найдено")
+            self.weapon_rows_layout.addWidget(label(
+                "Включи оружие в настройках или поменяй категорию.", "Muted", True))
+            return
+        self.weapon_summary.setText(f"Выбрано: {len(weapons)} · {len(WEAPONS)} позиций в каталоге")
+        for number, weapon in enumerate(weapons, 1):
+            row = QFrame()
+            row.setObjectName("WeaponRow")
+            rowlayout = QHBoxLayout(row)
+            rowlayout.setContentsMargins(13, 10, 13, 10)
+            rowlayout.setSpacing(12)
+            emblem = QLabel()
+            emblem.setPixmap(glyph(weapon.kind, "#D9A19A", 22).pixmap(22, 22))
+            emblem.setFixedWidth(24)
+            rowlayout.addWidget(emblem)
+            info = QVBoxLayout()
+            info.setSpacing(3)
+            info.addWidget(label(weapon.name, "WeaponTitle", True))
+            info.addWidget(label(f"Слот {number:02d}  ·  {CATEGORIES[weapon.kind]}", "WeaponInfo"))
+            rowlayout.addLayout(info, 1)
+            if weapon.dlc:
+                rowlayout.addWidget(label("DLC", "DlcBadge"))
+            self.weapon_rows_layout.addWidget(row)
+
     def generate(self) -> None:
         perks = self.selected_perks()
         if not perks:
             QMessageBox.warning(self, "Нет доступных классов", "Отметь хотя бы один класс в левой панели.")
             return
+        if self.weapon_check.isChecked():
+            eligible = [p for p in perks if self.weapon_pool(p)]
+            if not eligible:
+                QMessageBox.warning(
+                    self, "Нет подходящего оружия",
+                    "Выбранная категория не содержит доступных предметов для разрешённых классов. "
+                    "Включи другие категории, DLC или режим «Любое оружие»."
+                )
+                return
+            perks = eligible
         perk = self.pick_perk(perks)
         diff = self.difficulty_combo.currentText()
         if diff == "Случайная":
@@ -623,6 +807,7 @@ class Randomizer(QMainWindow):
             "when": datetime.now().strftime("%d.%m.%Y %H:%M"),
             "perk": perk,
             "skills": self.pick_skills(),
+            "weapons": self.pick_weapon_ids(perk),
             "map": RNG.choice(MAPS) if self.map_check.isChecked() else "Свободный выбор",
             "difficulty": diff,
             "length": length,
@@ -653,6 +838,8 @@ class Randomizer(QMainWindow):
         self.perk_name.setText(perk or "—")
         self.perk_meta.setText(f"{data.get('en', '')}   /   {data.get('role', '')}")
         self.mark.setText(data.get("mark", "--"))
+        self.perk_icon.setPixmap(glyph(PERK_ICONS.get(perk, "class"), "#E1A69E", 22).pixmap(22, 22))
+        self.update_weapon_rows(result.get("weapons", []))
         self.skills_value.setText(result.get("skills", "—"))
         self.map_value.setText(result.get("map", "—"))
         self.diff_value.setText(result.get("difficulty", "—"))
@@ -668,6 +855,7 @@ class Randomizer(QMainWindow):
         return ("KILLING FLOOR 2 — RANDOMIZER\n"
                 f"Класс: {data.get('perk', '—')}\n"
                 f"Навыки: {data.get('skills', '—')}\n"
+                f"Оружие: {', '.join(weapon_labels(data.get('weapons', []))) or 'Не выбрано'}\n"
                 f"Карта: {data.get('map', '—')}\n"
                 f"Сложность: {data.get('difficulty', '—')}\n"
                 f"Длина: {data.get('length', '—')}\n"

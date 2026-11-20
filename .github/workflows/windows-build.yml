@@ -35,10 +35,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt "pyinstaller>=6.11,<7"
 
-      - name: Run updater tests and syntax checks
+      - name: Run regression and desktop GUI tests
         run: |
-          python -m py_compile kf2_randomizer.py update_service.py
+          python -m py_compile kf2_randomizer.py update_service.py weapons_data.py ui_icons.py
           python -m unittest discover -s tests -v
+          python tests/qt_smoke.py
 
       - name: Build the Windows desktop application
         shell: pwsh
