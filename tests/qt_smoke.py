@@ -11,7 +11,7 @@ from weapons_data import WEAPON_BY_ID, sum_weight
 
 app = QApplication([])
 win = Randomizer()
-assert VERSION == "0.6.0"
+assert VERSION == (Path(__file__).resolve().parents[1] / "VERSION.txt").read_text(encoding="utf-8").strip()
 assert win.current["perk"]
 assert win.current["weapons"]
 assert win.weapon_rows_layout.count() >= 1
