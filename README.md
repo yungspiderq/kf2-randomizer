@@ -12,7 +12,7 @@ The button **Проверить обновления** checks official releases 
 
 - 10 playable KF2 perks, level 5–25 skill-side choices, maps, difficulty, match length and optional challenges.
 - **85 curated in-game weapons** in 10 categories, including 12 optionally enabled DLC-labelled entries. Names and assignments are an editable catalog, not a claim of live in-game ownership or inventory.
-- **Perk-only weapons** (default) or a global pool, 1–3 unique items, category selector, DLC toggle (off by default), and attempt to avoid weapons used on the previous roll.
+- **Perk-only weapons** (default) or a global pool, up to 6 unique items, category selector, DLC toggle (off by default), and attempt to avoid weapons used on the previous roll.
 - **Reroll weapons** without changing your class, skills, map or difficulty.
 - Results in history and on clipboard include chosen weapon names. Compatible with v0.4.0 saved settings/history.
 - Clean, restrained dark UI. Thin hand-drawn vector icons in toolbar, perk list and weapon results; no emoji/icon-font dependencies.
@@ -40,3 +40,8 @@ python tests/qt_smoke.py
 ## Credits
 
 Fan project by [yungspiderq](https://github.com/yungspiderq), not affiliated with Tripwire Interactive. UI cleanup follows the practical principles of [unslop](https://github.com/heydamir/unslop): clear hierarchy, restrained accent color, less visual noise, consistent spacing and purposeful icons. In-game item reference catalog based on the community-maintained [KF2 weapons index](https://killingfloor.fandom.com/wiki/Killing_Floor_2_Weapons).
+
+
+## Weight-aware in-game inventory randomizer
+
+Choose 15 / 20 capacity points and select **По количеству** (fit as many of the requested items as allowed), **Заполнить до лимита** (maximize weight without exceeding it) or **Случайный весовой бюджет** (pick a random weight target). All modes respect a maximum number of distinct items, the selected category and DLC setting. The requested 20-point option is enforced only for Support/Survivalist; other classes automatically use 15. The user must have the qualifying in-game skill/level unlocked to use 20. Item weights are taken from an older community catalogue; uncertain entries are omitted, not guessed.

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from update_service import Release, fetch_latest, download_update, launch_replace_and_restart
-from weapons_data import CATEGORIES, WEAPONS, WEAPON_BY_ID, available_weapons, choose_loadout, weapon_labels
+from weapons_data import CATEGORIES, WEAPONS, WEAPON_BY_ID, available_weapons, weighted_loadout, effective_weight_capacity, sum_weight, weapon_labels
 from ui_icons import icon as glyph
 
 from PySide6.QtCore import Qt, QStandardPaths, QThread, Signal, QTimer, QUrl
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_TITLE = "KF2 RANDOMIZER"
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 RNG = random.SystemRandom()
 
 # Ten playable character classes. The app randomizes skill-side selections
@@ -158,6 +158,9 @@ QLabel#Badge { background: #382624; color: #E9B0A9; border: 1px solid #60423E;
                  border-radius: 5px; padding: 5px 8px; font-weight: 700; }
 QLabel#WeaponTitle { color: #F3F5F8; font-size: 14px; font-weight: 650; }
 QLabel#WeaponInfo { color: #AAB4BE; font-size: 11px; }
+QLabel#WeightBadge { background: #22332E; color: #B8DBC7; font-size: 11px;
+                     border: 1px solid #3C5B4A; border-radius: 5px; padding: 4px 7px; }
+QLabel#ArtworkBox { background: #252B31; border: 1px solid #3A424A; border-radius: 6px; }
 QLabel#DlcBadge { color: #D4C09D; font-size: 10px; background: #302C26;
                   border: 1px solid #554B3E; border-radius: 4px; padding: 3px 6px; }
 QPushButton { background: #262C34; border: 1px solid #3B434D; border-radius: 7px;
@@ -417,9 +420,34 @@ class Randomizer(QMainWindow):
         self.weapon_mode_combo.currentTextChanged.connect(self.persist)
         wp.addWidget(self.weapon_mode_combo)
 
-        wp.addWidget(label("КОЛИЧЕСТВО", "Kicker"))
+        wp.addWidget(label("АЛГОРИТМ ВЫБОРА", "Kicker"))
+        self.weapon_weight_mode_combo = QComboBox()
+        self.weapon_weight_mode_combo.addItem("По количеству", "fixed")
+        self.weapon_weight_mode_combo.addItem("Заполнить до лимита", "fill")
+        self.weapon_weight_mode_combo.addItem("Случайный весовой бюджет", "surprise")
+        wanted_mode = self.prefs.get("weapon_weight_mode", "fixed")
+        self.weapon_weight_mode_combo.setCurrentIndex(
+            max(0, self.weapon_weight_mode_combo.findData(wanted_mode)))
+        self.weapon_weight_mode_combo.currentIndexChanged.connect(self.persist)
+        wp.addWidget(self.weapon_weight_mode_combo)
+        self.weight_mode_hint = label("", "Muted", True)
+        wp.addWidget(self.weight_mode_hint)
+        self.weapon_weight_mode_combo.currentIndexChanged.connect(self.update_weight_mode_hint)
+        self.update_weight_mode_hint()
+
+        wp.addWidget(label("ЛИМИТ ПЕРЕНОСИМОГО ВЕСА", "Kicker"))
+        self.weapon_capacity_combo = QComboBox()
+        self.weapon_capacity_combo.addItem("15 кг — обычно", 15)
+        self.weapon_capacity_combo.addItem("20 кг — с бонусом класса/навыка", 20)
+        saved_cap = self.prefs.get("weapon_capacity", 15)
+        self.weapon_capacity_combo.setCurrentIndex(
+            max(0, self.weapon_capacity_combo.findData(saved_cap)))
+        self.weapon_capacity_combo.currentIndexChanged.connect(self.persist)
+        wp.addWidget(self.weapon_capacity_combo)
+
+        wp.addWidget(label("КОЛИЧЕСТВО / МАКСИМУМ", "Kicker"))
         self.weapon_count_combo = QComboBox()
-        self.weapon_count_combo.addItems(["1", "2", "3"])
+        self.weapon_count_combo.addItems([str(x) for x in range(1, 7)])
         self.weapon_count_combo.setCurrentText(str(self.prefs.get("weapon_count", "2")))
         self.weapon_count_combo.currentTextChanged.connect(self.persist)
         wp.addWidget(self.weapon_count_combo)
@@ -444,8 +472,9 @@ class Randomizer(QMainWindow):
         self.weapon_avoid_check.toggled.connect(self.persist)
         wp.addWidget(self.weapon_avoid_check)
         wp.addWidget(label(
-            "При фильтре по классу неподходящие классы временно пропускаются. "
-            "DLC по умолчанию выключены.", "Muted", True))
+            "Вес — базовый, без улучшений; неизвестные значения исключены. "
+            "Лимит 20 действует только для Поддержки и Выживальщика "
+            "с подходящим уровнем/навыком; остальным применяется 15.", "Muted", True))
         sidelay.addWidget(weapon_panel)
         sidelay.addStretch(1)
         split.setStretchFactor(0, 0)
@@ -652,6 +681,7 @@ class Randomizer(QMainWindow):
         return [p for p, cb in self.perk_checks.items() if cb.isChecked()]
 
     def persist(self, *_args: object) -> None:
+        self.prefs.pop("weapon_image_folder", None)  # retired in the text-and-icon UI
         self.prefs.update({
             "selected_perks": self.selected_perks(),
             "skills_on": self.skill_check.isChecked(),
@@ -668,6 +698,8 @@ class Randomizer(QMainWindow):
             "weapon_kind": self.weapon_kind_combo.currentData(),
             "weapon_dlc": self.weapon_dlc_check.isChecked(),
             "weapon_avoid": self.weapon_avoid_check.isChecked(),
+            "weapon_weight_mode": self.weapon_weight_mode_combo.currentData(),
+            "weapon_capacity": self.weapon_capacity_combo.currentData(),
             "bag": self.bag,
             "history": self.history[:80],
         })
@@ -711,6 +743,18 @@ class Randomizer(QMainWindow):
             return "Нет подходящих испытаний", ""
         return RNG.choice(all_challenges)
 
+    def update_weight_mode_hint(self, *_args: object) -> None:
+        descriptions = {
+            "fixed": "До выбранного числа предметов без перегруза.",
+            "fill": "Количество зависит от веса: заполняет лимит максимально.",
+            "surprise": "Каждый раз случайный целевой вес и число предметов.",
+        }
+        self.weight_mode_hint.setText(descriptions.get(
+            self.weapon_weight_mode_combo.currentData(), ""))
+
+    def capacity_for(self, perk: str) -> int:
+        return effective_weight_capacity(perk, int(self.weapon_capacity_combo.currentData()))
+
     def weapon_pool(self, perk: str) -> list:
         return available_weapons(
             perk,
@@ -726,8 +770,11 @@ class Randomizer(QMainWindow):
         recent = old_ids or []
         if self.weapon_avoid_check.isChecked() and not recent:
             recent = self.current.get("weapons", []) if self.current else []
-        selected = choose_loadout(
-            self.weapon_pool(perk), count,
+        selected = weighted_loadout(
+            self.weapon_pool(perk),
+            maximum_weight=self.capacity_for(perk),
+            maximum_items=count,
+            mode=str(self.weapon_weight_mode_combo.currentData()),
             recent=recent if self.weapon_avoid_check.isChecked() else (),
             rng=RNG,
         )
@@ -745,10 +792,12 @@ class Randomizer(QMainWindow):
             return
         result = self.current.copy()
         result["weapons"] = self.pick_weapon_ids(perk, list(result.get("weapons", [])))
+        result["weight_cap"] = self.capacity_for(perk)
+        result["weight_mode"] = self.weapon_weight_mode_combo.currentData()
         result["when"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         self.accept_result(result)
 
-    def update_weapon_rows(self, ids: list[str]) -> None:
+    def update_weapon_rows(self, ids: list[str], result: dict | None = None) -> None:
         while self.weapon_rows_layout.count():
             child = self.weapon_rows_layout.takeAt(0)
             if child.widget() is not None:
@@ -760,7 +809,13 @@ class Randomizer(QMainWindow):
             self.weapon_rows_layout.addWidget(label(
                 "Включи оружие в настройках или поменяй категорию.", "Muted", True))
             return
-        self.weapon_summary.setText(f"Выбрано: {len(weapons)} · {len(WEAPONS)} позиций в каталоге")
+        cap = (result or {}).get("weight_cap", self.weapon_capacity_combo.currentData())
+        kg = sum_weight(weapons)
+        unknown = sum(w.weight is None for w in weapons)
+        name = {"fixed": "По количеству", "fill": "До лимита", "surprise": "Случайный бюджет"}.get(
+            (result or {}).get("weight_mode", "fixed"), "Режим")
+        extra = " · вес части предметов неизвестен" if unknown else ""
+        self.weapon_summary.setText(f"Вес: {kg}/{cap} кг  ·  {len(weapons)} предметов  ·  {name}{extra}")
         for number, weapon in enumerate(weapons, 1):
             row = QFrame()
             row.setObjectName("WeaponRow")
@@ -768,8 +823,10 @@ class Randomizer(QMainWindow):
             rowlayout.setContentsMargins(13, 10, 13, 10)
             rowlayout.setSpacing(12)
             emblem = QLabel()
-            emblem.setPixmap(glyph(weapon.kind, "#D9A19A", 22).pixmap(22, 22))
-            emblem.setFixedWidth(24)
+            emblem.setPixmap(glyph(weapon.kind, "#D9A19A", 25).pixmap(25, 25))
+            emblem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            emblem.setObjectName("ArtworkBox")
+            emblem.setFixedSize(76, 54)
             rowlayout.addWidget(emblem)
             info = QVBoxLayout()
             info.setSpacing(3)
@@ -778,6 +835,8 @@ class Randomizer(QMainWindow):
             rowlayout.addLayout(info, 1)
             if weapon.dlc:
                 rowlayout.addWidget(label("DLC", "DlcBadge"))
+            rowlayout.addWidget(label(
+                f"{weapon.weight} кг" if weapon.weight is not None else "вес ?", "WeightBadge"))
             self.weapon_rows_layout.addWidget(row)
 
     def generate(self) -> None:
@@ -786,7 +845,9 @@ class Randomizer(QMainWindow):
             QMessageBox.warning(self, "Нет доступных классов", "Отметь хотя бы один класс в левой панели.")
             return
         if self.weapon_check.isChecked():
-            eligible = [p for p in perks if self.weapon_pool(p)]
+            eligible = [p for p in perks if any(
+                w.weight is not None and 0 < w.weight <= self.capacity_for(p)
+                for w in self.weapon_pool(p))]
             if not eligible:
                 QMessageBox.warning(
                     self, "Нет подходящего оружия",
@@ -808,6 +869,8 @@ class Randomizer(QMainWindow):
             "perk": perk,
             "skills": self.pick_skills(),
             "weapons": self.pick_weapon_ids(perk),
+            "weight_cap": self.capacity_for(perk),
+            "weight_mode": self.weapon_weight_mode_combo.currentData(),
             "map": RNG.choice(MAPS) if self.map_check.isChecked() else "Свободный выбор",
             "difficulty": diff,
             "length": length,
@@ -839,7 +902,7 @@ class Randomizer(QMainWindow):
         self.perk_meta.setText(f"{data.get('en', '')}   /   {data.get('role', '')}")
         self.mark.setText(data.get("mark", "--"))
         self.perk_icon.setPixmap(glyph(PERK_ICONS.get(perk, "class"), "#E1A69E", 22).pixmap(22, 22))
-        self.update_weapon_rows(result.get("weapons", []))
+        self.update_weapon_rows(result.get("weapons", []), result)
         self.skills_value.setText(result.get("skills", "—"))
         self.map_value.setText(result.get("map", "—"))
         self.diff_value.setText(result.get("difficulty", "—"))
@@ -856,6 +919,8 @@ class Randomizer(QMainWindow):
                 f"Класс: {data.get('perk', '—')}\n"
                 f"Навыки: {data.get('skills', '—')}\n"
                 f"Оружие: {', '.join(weapon_labels(data.get('weapons', []))) or 'Не выбрано'}\n"
+                f"Вес: {sum_weight([WEAPON_BY_ID[x] for x in data.get('weapons', []) if x in WEAPON_BY_ID])}"
+                f"/{data.get('weight_cap', 15)} кг\n"
                 f"Карта: {data.get('map', '—')}\n"
                 f"Сложность: {data.get('difficulty', '—')}\n"
                 f"Длина: {data.get('length', '—')}\n"

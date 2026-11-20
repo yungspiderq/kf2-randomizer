@@ -1,20 +1,13 @@
-# KF2 Randomizer v0.5.0 — Weapons & UI refresh
+# KF2 Randomizer v0.6.0 — Inventory capacity modes
 
-Standalone Windows 64-bit Qt application. No HTML, no browser, no Python installation required.
+Native Qt desktop app for Windows. No HTML.
 
-### New
+- New **game carry-weight system** with 15/20 game weight units selectable capacity. The extended capacity is conditional on in-game perks/skills.
+- Three dedicated selection modes: **fixed number of items**, **fill up to capacity**, and **surprise weight budget**. The number of rolled items varies in the latter two modes.
+- Inventory indicator shows **used / allowed kg** with individual weights. Never generates a loadout exceeding the chosen limit.
+- Adds checked base game weights for 77 of the 85 catalog entries; unknowns are excluded from strict selection modes instead of inventing values. No upgrades are included.
+- Weapon rows use the app’s existing lightweight vector category icons; no weapon screenshots, image downloads or external art.
+- Mode settings persist, reroll and history preserve capacity.
+- Existing one-click update checker remains available.
 
-- Built-in **weapon randomizer**: curated 85-item game catalog, class-specific filtering, 10 types, optional DLC pool, and 1/2/3 random items per roll.
-- **Reroll only weapons** without touching the rest of the current match.
-- Avoid last roll's weapon choices where possible; never duplicate the same item within a roll.
-- Weapon names are saved in **history** and included in **Copy result**.
-- New purpose-made flat **vector icons** for perk classes, navigation and weapon categories.
-- Interface cleanup: calmer dark palette, clear type hierarchy, less decoration, compact class list and scrolling content to avoid clipping.
-
-### Compatibility / quality
-
-- Existing v0.4 settings and history still load.
-- New automated weapon catalog / filtering tests and Windows Qt offscreen smoke test.
-- Auto-update from GitHub Releases preserved. Downloads remain SHA-256 verified and user-confirmed.
-
-This is a fan-made game-only planning tool. DLC content is not unlocked, and the curated names/perk assignments may need adjustment after future game patches. Windows EXE is unsigned.
+Game-weight reference: [KF2 community inventory guide](https://steamcommunity.com/sharedfiles/filedetails/?id=894320418), older community snapshot; balance may change.
