@@ -8,20 +8,23 @@ from __future__ import annotations
 import json
 import random
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QStandardPaths
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from update_service import Release, fetch_latest, download_update, launch_replace_and_restart
+
+from PySide6.QtCore import Qt, QStandardPaths, QThread, Signal, QTimer, QUrl
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea,
+    QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton, QProgressDialog, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
 APP_TITLE = "KF2 RANDOMIZER"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 RNG = random.SystemRandom()
 
 # Ten playable character classes. The app randomizes skill-side selections
@@ -217,6 +220,36 @@ def build_card(name: str) -> tuple[QFrame, QLabel]:
     return card, value
 
 
+class UpdateWorker(QThread):
+    checked = Signal(object)
+    downloaded = Signal(str)
+    progress = Signal(int)
+    failed = Signal(str)
+
+    def __init__(self, mode: str, release: Release | None = None) -> None:
+        super().__init__()
+        self.mode = mode
+        self.release = release
+        self.stop_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.stop_event.set()
+
+    def run(self) -> None:
+        try:
+            if self.mode == "check":
+                self.checked.emit(fetch_latest(VERSION))
+            elif self.mode == "download" and self.release is not None:
+                path = download_update(
+                    self.release,
+                    lambda done, total: self.progress.emit(int(done * 100 / total)),
+                    self.stop_event.is_set,
+                )
+                self.downloaded.emit(str(path))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class Randomizer(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -229,12 +262,18 @@ class Randomizer(QMainWindow):
         self.bag: list[str] = [x for x in self.prefs.get("bag", []) if x in PERKS]
         self.current: dict = self.history[0].copy() if self.history else {}
         self.perk_checks: dict[str, QCheckBox] = {}
+        self._update_workers: set[UpdateWorker] = set()
+        self._checking_silently = False
+        self._downloading_update = False
+        self._progress_dialog: QProgressDialog | None = None
         self.build_ui()
         self.refresh_history()
         if self.current:
             self.show_result(self.current)
         else:
             self.generate()
+        if self.auto_updates_check.isChecked():
+            QTimer.singleShot(1800, lambda: self.check_updates(silent=True))
 
     def build_ui(self) -> None:
         root = QWidget()
@@ -251,6 +290,9 @@ class Randomizer(QMainWindow):
         brand.addWidget(label("KILLING FLOOR 2  /  RANDOMIZER", "Brand"))
         header.addLayout(brand)
         header.addStretch(1)
+        self.update_button = button("Проверить обновления", "Quiet")
+        self.update_button.clicked.connect(self.check_updates)
+        header.addWidget(self.update_button, 0, Qt.AlignmentFlag.AlignVCenter)
         htag = label(f"DESKTOP  ·  v{VERSION}", "Muted")
         header.addWidget(htag, 0, Qt.AlignmentFlag.AlignVCenter)
         outer.addLayout(header)
@@ -304,6 +346,10 @@ class Randomizer(QMainWindow):
         self.solo_check.setChecked(bool(self.prefs.get("solo", False)))
         self.solo_check.toggled.connect(self.persist)
         sp.addWidget(self.solo_check)
+        self.auto_updates_check = QCheckBox("Проверять обновления при запуске")
+        self.auto_updates_check.setChecked(bool(self.prefs.get("auto_updates", True)))
+        self.auto_updates_check.toggled.connect(self.persist)
+        sp.addWidget(self.auto_updates_check)
 
         sp.addWidget(label("СЛОЖНОСТЬ МАТЧА", "Kicker"))
         self.difficulty_combo = QComboBox()
@@ -408,6 +454,96 @@ class Randomizer(QMainWindow):
         footer = label("Случайный набор для игры вручную. Не изменяет файлы, серверы и инвентарь KF2.", "Muted", True)
         mainlay.addWidget(footer)
 
+    def _spawn_update_worker(self, worker: UpdateWorker) -> None:
+        self._update_workers.add(worker)
+        worker.finished.connect(lambda: self._update_workers.discard(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(self._update_failed)
+        worker.start()
+
+    def check_updates(self, *_unused: object, silent: bool = False) -> None:
+        if any(w.isRunning() for w in self._update_workers):
+            return
+        self._checking_silently = silent
+        self.update_button.setEnabled(False)
+        self.update_button.setText("Проверка...")
+        worker = UpdateWorker("check")
+        worker.checked.connect(self._updates_checked)
+        worker.finished.connect(self._check_finished)
+        self._spawn_update_worker(worker)
+
+    def _check_finished(self) -> None:
+        self.update_button.setEnabled(True)
+        self.update_button.setText("Проверить обновления")
+
+    def _updates_checked(self, release: Release | None) -> None:
+        if release is None:
+            self.statusBar().showMessage(f"Установлена актуальная версия {VERSION}", 5000)
+            if not self._checking_silently:
+                QMessageBox.information(self, "Обновления", f"Установлена актуальная версия v{VERSION}.")
+            return
+        details = ("\n\nЧто нового:\n" + release.notes) if release.notes else ""
+        answer = QMessageBox.question(
+            self, "Доступно обновление",
+            f"Доступна версия v{release.version}.\nТекущая версия: v{VERSION}."
+            f"{details}\n\nСкачать обновление и перезапустить программу?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            QTimer.singleShot(100, lambda: self._download_release(release))
+
+    def _download_release(self, release: Release) -> None:
+        if any(w.isRunning() for w in self._update_workers):
+            QTimer.singleShot(300, lambda: self._download_release(release))
+            return
+        self._downloading_update = True
+        dialog = QProgressDialog("Загрузка обновления из GitHub Releases...", "Отмена", 0, 100, self)
+        dialog.setWindowTitle(f"Обновление до v{release.version}")
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setMinimumDuration(0)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.setValue(0)
+        self._progress_dialog = dialog
+        worker = UpdateWorker("download", release)
+        worker.progress.connect(dialog.setValue)
+        worker.downloaded.connect(self._update_downloaded)
+        dialog.canceled.connect(worker.cancel)
+        self._spawn_update_worker(worker)
+        dialog.show()
+
+    def _update_downloaded(self, filename: str) -> None:
+        self._downloading_update = False
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+        path = Path(filename)
+        try:
+            launch_replace_and_restart(path)
+        except Exception as exc:
+            QMessageBox.information(
+                self, "Обновление загружено",
+                f"Файл обновления проверен и сохранён:\n{path}\n\n"
+                f"Для автоматической установки запусти собранный KF2-Randomizer.exe.\n{exc}",
+            )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+            return
+        self.persist()
+        QTimer.singleShot(250, QApplication.quit)
+
+    def _update_failed(self, message: str) -> None:
+        was_downloading = self._downloading_update
+        self._downloading_update = False
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+        self.statusBar().showMessage("Обновление: " + message, 9000)
+        if message == "Загрузка отменена":
+            return
+        if was_downloading or not self._checking_silently:
+            QMessageBox.warning(self, "Ошибка обновления", message)
+
     def set_all_perks(self, enabled: bool) -> None:
         for cb in self.perk_checks.values():
             cb.setChecked(enabled)
@@ -423,6 +559,7 @@ class Randomizer(QMainWindow):
             "map": self.map_check.isChecked(),
             "smart": self.smart_check.isChecked(),
             "solo": self.solo_check.isChecked(),
+            "auto_updates": self.auto_updates_check.isChecked(),
             "difficulty": self.difficulty_combo.currentText(),
             "length": self.length_combo.currentText(),
             "challenge": self.challenge_combo.currentText(),

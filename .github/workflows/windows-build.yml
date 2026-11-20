@@ -1,59 +1,76 @@
-name: Windows native desktop EXE
+name: Windows EXE + GitHub Release
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  desktop-exe:
+  build-and-release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           architecture: x64
           cache: pip
 
-      - name: Install Qt desktop and PyInstaller
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION.txt -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION.txt' }
+          if (!(Select-String -Path kf2_randomizer.py -Pattern "VERSION = `"$version`"" -SimpleMatch)) { throw 'App version differs from VERSION.txt' }
+          Write-Host "Building v$version"
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt "pyinstaller>=6.11,<7"
 
-      - name: Check Python syntax and Windows native binary
-        shell: pwsh
+      - name: Run updater tests and syntax checks
         run: |
-          python -m py_compile kf2_randomizer.py
-          if (!(Test-Path 'KF2-Randomizer-Native.exe')) { throw 'Native executable is missing' }
-          $header = [System.IO.File]::ReadAllBytes('KF2-Randomizer-Native.exe')
-          if ($header[0] -ne 0x4D -or $header[1] -ne 0x5A) { throw 'Native executable is not a Windows PE file' }
+          python -m py_compile kf2_randomizer.py update_service.py
+          python -m unittest discover -s tests -v
 
-      - name: Build PySide6 GUI EXE
+      - name: Build the Windows desktop application
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --onefile --windowed --clean --name 'KF2-Randomizer' --icon 'assets/kf2.ico' kf2_randomizer.py
-          if (!(Test-Path 'dist/KF2-Randomizer.exe')) { throw 'Build did not produce KF2-Randomizer.exe' }
+          if (!(Test-Path 'dist/KF2-Randomizer.exe')) { throw 'PyInstaller did not produce a Windows EXE' }
+          $hash = (Get-FileHash 'dist/KF2-Randomizer.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  KF2-Randomizer.exe" | Set-Content 'dist/KF2-Randomizer.exe.sha256' -Encoding ascii
 
-      - name: Upload both desktop editions
+      - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: KF2-Randomizer-Windows-x64
           path: |
             dist/KF2-Randomizer.exe
-            KF2-Randomizer-Native.exe
+            dist/KF2-Randomizer.exe.sha256
           if-no-files-found: error
 
-      - name: Add Qt desktop EXE to GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/KF2-Randomizer.exe
-            KF2-Randomizer-Native.exe
-          generate_release_notes: true
+      - name: Publish new version to GitHub Releases
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content VERSION.txt -Raw).Trim()
+          $tag = "v$version"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists, leaving it unchanged."
+            exit 0
+          }
+          gh release create $tag 'dist/KF2-Randomizer.exe' 'dist/KF2-Randomizer.exe.sha256' `
+            --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA `
+            --title "KF2 Randomizer $tag" --notes-file 'RELEASE_NOTES.md' --latest
+          if ($LASTEXITCODE -ne 0) { throw "Could not create release $tag" }
