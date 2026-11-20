@@ -1,0 +1,59 @@
+name: Windows native desktop EXE
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  desktop-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+
+      - name: Install Qt desktop and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt "pyinstaller>=6.11,<7"
+
+      - name: Check Python syntax and Windows native binary
+        shell: pwsh
+        run: |
+          python -m py_compile kf2_randomizer.py
+          if (!(Test-Path 'KF2-Randomizer-Native.exe')) { throw 'Native executable is missing' }
+          $header = [System.IO.File]::ReadAllBytes('KF2-Randomizer-Native.exe')
+          if ($header[0] -ne 0x4D -or $header[1] -ne 0x5A) { throw 'Native executable is not a Windows PE file' }
+
+      - name: Build PySide6 GUI EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --onefile --windowed --clean --name 'KF2-Randomizer' --icon 'assets/kf2.ico' kf2_randomizer.py
+          if (!(Test-Path 'dist/KF2-Randomizer.exe')) { throw 'Build did not produce KF2-Randomizer.exe' }
+
+      - name: Upload both desktop editions
+        uses: actions/upload-artifact@v4
+        with:
+          name: KF2-Randomizer-Windows-x64
+          path: |
+            dist/KF2-Randomizer.exe
+            KF2-Randomizer-Native.exe
+          if-no-files-found: error
+
+      - name: Add Qt desktop EXE to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/KF2-Randomizer.exe
+            KF2-Randomizer-Native.exe
+          generate_release_notes: true
