@@ -1,4 +1,4 @@
-name: Windows EXE + GitHub Release
+name: Windows desktop EXE + portable ZIP
 
 on:
   push:
@@ -11,67 +11,86 @@ permissions:
 jobs:
   build-and-release:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           architecture: x64
           cache: pip
-
       - name: Verify release version
         shell: pwsh
         run: |
-          $version = (Get-Content VERSION.txt -Raw).Trim()
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION.txt' }
-          if (!(Select-String -Path kf2_randomizer.py -Pattern "VERSION = `"$version`"" -SimpleMatch)) { throw 'App version differs from VERSION.txt' }
-          Write-Host "Building v$version"
-
+          python -c "from pathlib import Path; v=Path('VERSION.txt').read_text().strip(); s=Path('kf2_randomizer.py').read_text(encoding='utf-8'); assert ('VERSION = '+chr(34)+v+chr(34)) in s, 'App/version mismatch'"
       - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt "pyinstaller>=6.11,<7"
-
-      - name: Run regression and desktop GUI tests
+          python -m pip install -r requirements.txt 'pyinstaller>=6.20,<7'
+      - name: Test source and Qt UI
+        shell: pwsh
         run: |
           python -m py_compile kf2_randomizer.py update_service.py weapons_data.py ui_icons.py
           python -m unittest discover -s tests -v
           python tests/qt_smoke.py
-
-      - name: Build the Windows desktop application
+      - name: Bundle Python/VC runtime and build single + portable versions
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --onefile --windowed --clean --name 'KF2-Randomizer' --icon 'assets/kf2.ico' kf2_randomizer.py
-          if (!(Test-Path 'dist/KF2-Randomizer.exe')) { throw 'PyInstaller did not produce a Windows EXE' }
-          $hash = (Get-FileHash 'dist/KF2-Randomizer.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  KF2-Randomizer.exe" | Set-Content 'dist/KF2-Randomizer.exe.sha256' -Encoding ascii
-
-      - name: Upload Windows EXE artifact
+          $pythonHome = (python -c "import os,sys; print(os.path.dirname(sys.executable))").Trim()
+          $extra = @()
+          foreach ($name in @('vcruntime140.dll', 'vcruntime140_1.dll')) {
+            $dll = Join-Path $pythonHome $name
+            if (!(Test-Path $dll)) { $dll = Join-Path $env:WINDIR "System32\$name" }
+            if (!(Test-Path $dll)) { throw "Missing Windows runtime $name" }
+            Write-Host "Bundling $name"
+            $extra += @('--add-binary', "$dll;.")
+          }
+          New-Item -ItemType Directory -Force 'build/spec' | Out-Null
+          $common = @('--noconfirm', '--clean', '--windowed', '--name', 'KF2-Randomizer', '--icon', 'assets/kf2.ico')
+          python -m PyInstaller @common --onefile --distpath 'dist/single' --workpath 'build/single' --specpath 'build/spec' @extra kf2_randomizer.py
+          if ($LASTEXITCODE -ne 0) { throw 'Failed one-file build' }
+          python -m PyInstaller @common --onedir --distpath 'dist/portable' --workpath 'build/portable' --specpath 'build/spec' @extra kf2_randomizer.py
+          if ($LASTEXITCODE -ne 0) { throw 'Failed portable build' }
+      - name: Test REAL packaged EXEs on Windows
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          & ./tools/test_frozen_windows.ps1 -ExePath 'dist/single/KF2-Randomizer.exe' -Label 'single'
+          & ./tools/test_frozen_windows.ps1 -ExePath 'dist/portable/KF2-Randomizer/KF2-Randomizer.exe' -Label 'portable'
+          if (!(Test-Path 'dist/portable/KF2-Randomizer/_internal/python312.dll')) { throw 'Portable Python DLL missing' }
+          if (!(Test-Path 'dist/portable/KF2-Randomizer/_internal/vcruntime140.dll')) { throw 'Portable VC runtime DLL missing' }
+      - name: Package ZIP and SHA256
+        shell: pwsh
+        run: |
+          Copy-Item 'dist/single/KF2-Randomizer.exe' 'dist/KF2-Randomizer.exe'
+          Compress-Archive -Path 'dist/portable/KF2-Randomizer' -DestinationPath 'dist/KF2-Randomizer-Portable-Windows-x64.zip' -CompressionLevel Optimal
+          foreach ($name in @('KF2-Randomizer.exe', 'KF2-Randomizer-Portable-Windows-x64.zip')) {
+            $hash = (Get-FileHash (Join-Path 'dist' $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name" | Set-Content (Join-Path 'dist' "$name.sha256") -Encoding ascii
+          }
+      - name: Upload tested distributions
         uses: actions/upload-artifact@v4
         with:
           name: KF2-Randomizer-Windows-x64
           path: |
             dist/KF2-Randomizer.exe
             dist/KF2-Randomizer.exe.sha256
+            dist/KF2-Randomizer-Portable-Windows-x64.zip
+            dist/KF2-Randomizer-Portable-Windows-x64.zip.sha256
           if-no-files-found: error
-
-      - name: Publish new version to GitHub Releases
+      - name: Publish GitHub Release after both builds passed
         if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = (Get-Content VERSION.txt -Raw).Trim()
-          $tag = "v$version"
+          $tag = 'v' + (Get-Content VERSION.txt -Raw).Trim()
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag already exists, leaving it unchanged."
-            exit 0
-          }
-          gh release create $tag 'dist/KF2-Randomizer.exe' 'dist/KF2-Randomizer.exe.sha256' `
-            --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA `
-            --title "KF2 Randomizer $tag" --notes-file 'RELEASE_NOTES.md' --latest
-          if ($LASTEXITCODE -ne 0) { throw "Could not create release $tag" }
+          if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists"; exit 0 }
+          $files = @('dist/KF2-Randomizer.exe', 'dist/KF2-Randomizer.exe.sha256', 'dist/KF2-Randomizer-Portable-Windows-x64.zip', 'dist/KF2-Randomizer-Portable-Windows-x64.zip.sha256')
+          gh release create $tag @files --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "KF2 Randomizer $tag" --notes-file 'RELEASE_NOTES.md' --latest
+          if ($LASTEXITCODE -ne 0) { throw "Release $tag failed" }

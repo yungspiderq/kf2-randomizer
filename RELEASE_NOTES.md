@@ -1,13 +1,22 @@
-# KF2 Randomizer v0.6.0 — Inventory capacity modes
+# KF2 Randomizer v0.6.1 — Windows startup repair
 
-Native Qt desktop app for Windows. No HTML.
+Fixes the reported `Failed to load Python DLL python312.dll` startup issue by adding a **portable folder-based edition**, explicitly collecting required VC++ runtime DLLs in both editions, and verifying the actual packaged applications start on Windows.
 
-- New **game carry-weight system** with 15/20 game weight units selectable capacity. The extended capacity is conditional on in-game perks/skills.
-- Three dedicated selection modes: **fixed number of items**, **fill up to capacity**, and **surprise weight budget**. The number of rolled items varies in the latter two modes.
-- Inventory indicator shows **used / allowed kg** with individual weights. Never generates a loadout exceeding the chosen limit.
-- Adds checked base game weights for 77 of the 85 catalog entries; unknowns are excluded from strict selection modes instead of inventing values. No upgrades are included.
-- Weapon rows use the app’s existing lightweight vector category icons; no weapon screenshots, image downloads or external art.
-- Mode settings persist, reroll and history preserve capacity.
-- Existing one-click update checker remains available.
+### Recommended download if v0.6.0 failed
 
-Game-weight reference: [KF2 community inventory guide](https://steamcommunity.com/sharedfiles/filedetails/?id=894320418), older community snapshot; balance may change.
+**KF2-Randomizer-Portable-Windows-x64.zip**
+
+Extract the entire folder, keeping `_internal`, then open `KF2-Randomizer.exe` inside it. No Python installation, no browser, and no temporary `_MEI` runtime extraction.
+
+### Other download
+
+**KF2-Randomizer.exe** is the revised single-file build for users who prefer a one-file executable. Unlike the portable edition, it extracts to Windows Temp while running, which can be affected by system configuration or security software.
+
+### Additional fixes
+
+- CI now boots both *frozen* Windows EXEs with Qt, not merely the source-code UI.
+- The portable edition's update checker directs users to the next portable ZIP instead of overwriting just the executable.
+- Existing configuration, saved history, UI and other app features are preserved.
+- SHA-256 sidecar files included for both downloads.
+
+If the portable edition also cannot start, check Windows updates, install the official Microsoft Visual C++ Redistributable (x64), and inspect antivirus quarantine history without disabling antivirus protection.

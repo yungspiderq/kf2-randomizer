@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from update_service import Release, fetch_latest, download_update, launch_replace_and_restart
+from update_service import Release, fetch_latest, download_update, launch_replace_and_restart, is_portable_build
 from weapons_data import CATEGORIES, WEAPONS, WEAPON_BY_ID, available_weapons, weighted_loadout, effective_weight_capacity, sum_weight, weapon_labels
 from ui_icons import icon as glyph
 
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_TITLE = "KF2 RANDOMIZER"
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 RNG = random.SystemRandom()
 
 # Ten playable character classes. The app randomizes skill-side selections
@@ -611,6 +611,21 @@ class Randomizer(QMainWindow):
                 QMessageBox.information(self, "Обновления", f"Установлена актуальная версия v{VERSION}.")
             return
         details = ("\n\nЧто нового:\n" + release.notes) if release.notes else ""
+        # A portable bundle requires its _internal folder. Never replace just
+        # the launcher EXE with a one-file build during an automatic update.
+        if is_portable_build():
+            answer = QMessageBox.question(
+                self, "Доступно обновление",
+                f"Доступна версия v{release.version}.\n"
+                "Для портативной сборки скачай новый Portable ZIP: "
+                "нужно заменить всю папку, а не только EXE."
+                f"{details}\n\nОткрыть GitHub Release?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl(release.url))
+            return
         answer = QMessageBox.question(
             self, "Доступно обновление",
             f"Доступна версия v{release.version}.\nТекущая версия: v{VERSION}."
@@ -979,5 +994,23 @@ def main() -> None:
     sys.exit(app.exec())
 
 
+def packaged_startup_smoke(marker_file: Path) -> None:
+    """CI verifies real packaged Python DLL loading and Qt GUI startup."""
+    app = QApplication([])
+    app.setApplicationName("KF2 Randomizer")
+    app.setOrganizationName("YungSpiderQ")
+    app.setStyle("Fusion")
+    app.setStyleSheet(QSS)
+    win = Randomizer()
+    if not win.windowTitle() or not PERKS:
+        raise RuntimeError("Desktop UI did not initialize")
+    marker_file.write_text("KF2_RANDOMIZER_STARTUP_OK v" + VERSION, encoding="utf-8")
+    win.close()
+    app.quit()
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == "--startup-smoke-test":
+        packaged_startup_smoke(Path(sys.argv[2]))
+    else:
+        main()

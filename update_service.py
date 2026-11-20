@@ -189,6 +189,14 @@ def _ps_literal(path: str) -> str:
     return "'" + path.replace("'", "''") + "'"
 
 
+def is_portable_build() -> bool:
+    """PyInstaller onedir distributions include a companion _internal folder."""
+    return bool(
+        getattr(sys, "frozen", False)
+        and Path(str(getattr(sys, "_MEIPASS", ""))).name.lower() == "_internal"
+    )
+
+
 def launch_replace_and_restart(downloaded_exe: Path) -> None:
     """Start a detached Windows updater that waits for us to exit.
 
@@ -197,6 +205,8 @@ def launch_replace_and_restart(downloaded_exe: Path) -> None:
     """
     if os.name != "nt" or not getattr(sys, "frozen", False):
         raise UpdateError("Автоматическая установка работает только в собранной Windows EXE-версии")
+    if is_portable_build():
+        raise UpdateError("Для Portable-версии скачай новый ZIP из GitHub Releases и распакуй всю папку")
     target = Path(sys.executable).resolve()
     if target.name.lower() != ASSET_NAME.lower():
         raise UpdateError("Имя запущенной программы не соответствует файлу обновления")
