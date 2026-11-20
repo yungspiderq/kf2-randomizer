@@ -49,7 +49,8 @@ jobs:
             $extra += @('--add-binary', "$dll;.")
           }
           New-Item -ItemType Directory -Force 'build/spec' | Out-Null
-          $common = @('--noconfirm', '--clean', '--windowed', '--name', 'KF2-Randomizer', '--icon', 'assets/kf2.ico')
+          $iconPath = (Resolve-Path 'assets/kf2.ico').Path
+          $common = @('--noconfirm', '--clean', '--windowed', '--name', 'KF2-Randomizer', '--icon', $iconPath)
           python -m PyInstaller @common --onefile --distpath 'dist/single' --workpath 'build/single' --specpath 'build/spec' @extra kf2_randomizer.py
           if ($LASTEXITCODE -ne 0) { throw 'Failed one-file build' }
           python -m PyInstaller @common --onedir --distpath 'dist/portable' --workpath 'build/portable' --specpath 'build/spec' @extra kf2_randomizer.py
